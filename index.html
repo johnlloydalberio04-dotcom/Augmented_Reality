@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AR Object Info</title>
+  <style>
+    #webcam {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: auto;
+    }
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    body { margin: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+<video id="webcam" autoplay playsinline></video>
+<canvas id="overlay"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+<script>
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+
+// Object info database for recognized classes with expanded historical backgrounds
+const objectInfo = {
+    'person': {
+        title: 'Human',
+        description: 'A person detected. Humans are social beings with a rich history of innovation and culture.',
+        historicalBackground: 'Humans (Homo sapiens) evolved around 200,000 years ago in Africa. The species spread globally, developing agriculture around 10,000 years ago, leading to the rise of civilizations. Key milestones include the invention of writing (c. 3200 BC), the wheel (c. 3500 BC), and modern technology in the 20th-21st centuries.',
+        fact: 'There are over 7 billion people on Earth, with diverse cultures and histories.'
+    },
+    'car': {
+        title: 'Car',
+        description: 'A vehicle for transportation, symbolizing modern mobility.',
+        historicalBackground: 'The first practical automobile was invented by Karl Benz in 1885-1886 in Germany. Henry Ford revolutionized production with the assembly line in 1913, making cars affordable. The industry evolved through the 20th century, incorporating safety features and electric technology in recent decades.',
+        fact: 'Over 1 billion cars are in use worldwide today.'
+    },
+    'dog': {
+        title: 'Dog',
+        description: 'Man\'s best friend, domesticated for companionship and work.',
+        historicalBackground: 'Dogs were domesticated from wolves around 15,000 years ago, likely in Eurasia. They served as hunters, guardians, and companions in ancient societies. Breeds diversified over millennia, with roles in herding, hunting, and as service animals in modern times.',
+        fact: 'Dogs have been companions for over 15,000 years and can understand over 250 words.'
+    },
+    'cat': {
+        title: 'Cat',
+        description: 'A feline pet known for independence and affection.',
+        historicalBackground: 'Cats were domesticated around 9,000 years ago in the Near East from wild ancestors. They were revered in ancient Egypt as sacred animals associated with goddesses like Bastet. Cats spread globally, serving as pest control and pets, with breeds developing through selective breeding.',
+        fact: 'Cats can make over 100 different sounds and have been pets for 9,000 years.'
+    },
+    'chair': {
+        title: 'Chair',
+        description: 'A piece of furniture for sitting, essential in daily life.',
+        historicalBackground: 'Chairs date back to ancient Egypt around 3,000 BC, initially for royalty. In medieval Europe, chairs became common furniture. The 19th-20th centuries saw ergonomic designs, with modern chairs incorporating materials like plastic and adjustable features.',
+        fact: 'The oldest known chair dates back to 3,000 BC in Egypt.'
+    },
+    'bottle': {
+        title: 'Bottle',
+        description: 'A container for liquids, used for storage and transport.',
+        historicalBackground: 'Bottles evolved from ancient pottery and glassmaking. Glass bottles became common in the Roman Empire. The 19th century saw mass production with glass blowing machines, and the 20th century introduced plastic bottles, revolutionizing packaging and leading to environmental concerns.',
+        fact: 'The first plastic bottle was invented in 1947, changing global packaging.'
+    },
+    'cup': {
+        title: 'Cup',
+        description: 'A vessel for drinking, a staple in human culture.',
+        historicalBackground: 'Cups have been used since prehistoric times, made from materials like clay, wood, and metal. Ancient civilizations like the Greeks and Romans used ceramic cups. The Middle Ages saw metal cups for nobility, evolving into modern glass and plastic versions.',
+        fact: 'Cups have been used since ancient times, with the oldest examples from 10,000 BC.'
+    },
+    'book': {
+        title: 'Book',
+        description: 'A source of knowledge, preserving human thought.',
+        historicalBackground: 'Books originated with clay tablets in Mesopotamia around 2,400 BC. Papyrus scrolls in Egypt followed, then parchment in medieval Europe. The printing press by Johannes Gutenberg in 1450 revolutionized dissemination. Digital books emerged in the late 20th century.',
+        fact: 'The first printed book was the Gutenberg Bible in 1455.'
+    },
+    'laptop': {
+        title: 'Laptop',
+        description: 'A portable computer, enabling mobile computing.',
+        historicalBackground: 'The first laptop, the Osborne 1, was released in 1981. Advances in the 1990s-2000s included lighter designs and touchscreens. Laptops became essential for work and education, with integrated features like Wi-Fi and high-resolution displays.',
+        fact: 'The first laptop weighed 24 pounds and cost $1,795.'
+    },
+    'cell phone': {
+        title: 'Cell Phone',
+        description: 'A mobile communication device, connecting the world.',
+        historicalBackground: 'The first mobile phone call was made by Martin Cooper in 1973. Cell phones evolved from bulky devices to smartphones in the 2000s with apps and internet. They transformed communication, business, and daily life globally.',
+        fact: 'Over 5 billion people use cell phones worldwide.'
+    },
+    'statue': {
+        title: 'Statue',
+        description: 'A sculpture representing a person or thing, often commemorative.',
+        historicalBackground: 'Statues date back to ancient civilizations like Egypt and Greece, carved from stone or bronze. They honored gods, leaders, and heroes. Renaissance artists revived realism, and modern statues use diverse materials, serving as public art and memorials. Notable examples include statues of Saint Jean-Baptiste de La Salle, founder of the Lasallian Brothers in 1680, who revolutionized education for the poor and established the Institute of the Brothers of the Christian Schools. Another is the Mama Mary Grotto, inspired by apparitions of the Virgin Mary, such as in Lourdes, France in 1858, where Bernadette Soubirous reported visions, leading to the creation of grottos worldwide as places of pilgrimage and devotion.',
+        fact: 'The Statue of Liberty, a gift from France, was dedicated in 1886. Saint La Salle\'s legacy includes over 1,000 Lasallian schools globally, and Mama Mary Grotto sites attract millions of pilgrims annually.'
+    }
+    // Add more as needed
+};
+
+async function setupCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+    await new Promise(resolve => video.onloadedmetadata = resolve);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+}
+
+async function run() {
+    await setupCamera();
+    const model = await cocoSsd.load();
+
+    async function detect() {
+        const predictions = await model.detect(video);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        predictions.forEach(pred => {
+            const x = pred.bbox[0], y = pred.bbox[1];
+            const width = pred.bbox[2], height = pred.bbox[3];
+            const className = pred.class.toLowerCase();
+            
+            // Check if the object is recognized and confidence is high enough
+            if (objectInfo[className] && pred.score > 0.5) {
+                const info = objectInfo[className];
+                
+                // Draw bounding box
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, width, height);
+
+                // Draw line to info box
+                const centerX = x + width / 2;
+                const centerY = y + height / 2;
+                const infoX = centerX - 150; // Center the 300px wide box
+                const infoY = centerY - 75;  // Center the 150px tall box
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(infoX + 150, infoY + 75); // Line to center of info box
+                ctx.stroke();
+
+                // Draw info box (larger for more text)
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.fillRect(infoX, infoY, 300, 150);
+                ctx.fillStyle = 'black';
+                ctx.font = '12px Arial';
+                ctx.fillText(info.title, infoX + 10, infoY + 20);
+                ctx.fillText(info.description, infoX + 10, infoY + 35);
+                ctx.fillText('Historical Background:', infoX + 10, infoY + 55);
+                // Wrap historical background text
+                const words = info.historicalBackground.split(' ');
+                let line = '';
+                let yPos = infoY + 70;
+                words.forEach(word => {
+                    const testLine = line + word + ' ';
+                    const metrics = ctx.measureText(testLine);
+                    if (metrics.width > 280 && line !== '') {
+                        ctx.fillText(line, infoX + 10, yPos);
+                        line = word + ' ';
+                        yPos += 15;
+                    } else {
+                        line = testLine;
+                    }
+                });
+                ctx.fillText(line, infoX + 10, yPos);
+                ctx.fillText('Fact: ' + info.fact, infoX + 10, yPos + 20);
+            }
+        });
+
+        requestAnimationFrame(detect);
+    }
+
+    detect();
+}
+
+run();
+</script>
+</body>
+</html>
